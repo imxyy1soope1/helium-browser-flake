@@ -10,7 +10,7 @@ The AppImage version exists primarily for compatibility reasons.
 
 ```nix
 helium-browser = {
-  url = "github:ominit/helium-browser-flake";
+  url = "github:EFLKumo/helium-browser-flake";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
