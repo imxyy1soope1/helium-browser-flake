@@ -5,12 +5,15 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  actions: write
+
 jobs:
-  build:
+  build-and-publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -67,26 +70,6 @@ jobs:
           echo "WantMassQuery: 1" >> ./binary-cache/nix-cache-info
           echo "Priority: 40" >> ./binary-cache/nix-cache-info
 
-      - name: Upload local cache artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: binary-cache
-          path: ./binary-cache
-
-  publish:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
-    steps:
-      - name: Download local cache artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: binary-cache
-          path: ./binary-cache
-
       - name: Create Release and Upload NAR files
         env:
           GH_TOKEN: ${{ github.token }}
@@ -117,7 +100,7 @@ jobs:
 
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
-      
+
       - name: Publish the Release
         env:
           GH_TOKEN: ${{ github.token }}
