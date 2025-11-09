@@ -51,24 +51,82 @@ jobs:
       - name: Build the package
         run: nix build --print-build-logs
 
-      - name: Prepare Binary Cache Directory
-        run: mkdir -p ./binary-cache
+      - name: Calculate paths to upload (diff against cache.nixos.org)
+        id: calculate-paths
+        run: |
+          closure=$(nix path-info -r ./result)
+          paths_to_copy=$(echo "$closure" | xargs -P $(nproc) -I {} bash -c '
+            if ! nix-store --verify-path --store https://cache.nixos.org {} &>/dev/null; then
+              echo {}
+            fi
+          ')
 
-      - name: Sign the build output
+          echo "The following paths will be copied to the new cache:"
+          echo "$paths_to_copy"
+
+          (
+            echo 'paths<<EOF'
+            echo "$paths_to_copy"
+            echo 'EOF'
+          ) >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Binary Cache, Sign and Copy
         env:
           SIGNING_KEY: ${{ secrets.NIX_SIGNING_KEY }}
+          PATHS_TO_COPY: ${{ steps.calculate-paths.outputs.paths }}
         run: |
+          mkdir -p ./cache/nar
           echo "$SIGNING_KEY" > signing-key.pem
-          nix store sign --key-file signing-key.pem ./result
+          for STORE_PATH in $PATHS_TO_COPY; do
+            nix store sign --key-file signing-key.pem "$STORE_PATH"
+            SIGNATURE=$(nix path-info ./result --sigs | cut -d' ' -f2)
 
-      - name: Copy closure to local binary cache
-        run: nix copy --to file://$(pwd)/binary-cache ./result
+            echo "Packing ${STORE_PATH}..."
+            NAR_TEMP=$(mktemp)
+            nix nar pack "$STORE_PATH" > "$NAR_TEMP"
+            NAR_HASH=$(nix hash file --type sha256 --base32 "$NAR_TEMP")
+            NAR_SIZE=$(stat -f%z "$NAR_TEMP" 2>/dev/null || stat -c%s "$NAR_TEMP")
+            echo "${STORE_PATH} packed!"
+
+            echo "Compressing ${STORE_PATH}..."
+            NAR_COMPRESSED=$(mktemp)
+            # xz -c "$NAR_TEMP" > "$NAR_COMPRESSED"
+            zstd -c "$NAR_TEMP" > "$NAR_COMPRESSED"
+            FILE_HASH=$(nix hash file --type sha256 --base32 "$NAR_COMPRESSED")
+            FILE_SIZE=$(stat -f%z "$NAR_COMPRESSED" 2>/dev/null || stat -c%s "$NAR_COMPRESSED")
+            echo "${STORE_PATH} compressed!"
+
+            # NAR_FILENAME="${FILE_HASH}.nar.xz"
+            NAR_FILENAME="${FILE_HASH}.nar.zst"
+            mv "$NAR_COMPRESSED" "cache/nar/$NAR_FILENAME"
+            rm $NAR_TEMP
+
+            STORE_PATH_HASH=$(basename "$STORE_PATH" | cut -d'-' -f1)
+            STORE_PATH_NAME=$(basename "$STORE_PATH")
+            REFS=$(nix-store --query --references "$STORE_PATH" | xargs -n1 basename | tr '\n' ' ')
+            NARINFO_FILE="cache/${STORE_PATH_HASH}.narinfo"
+
+            (
+              echo "StorePath: $STORE_PATH"
+              echo "URL: nar/${NAR_FILENAME}"
+              # echo "Compression: xz"
+              echo "Compression: zstd"
+              echo "FileHash: sha256:${FILE_HASH}"
+              echo "FileSize: ${FILE_SIZE}"
+              echo "NarHash: sha256:${NAR_HASH}"
+              echo "NarSize: ${NAR_SIZE}"
+              echo "References: ${REFS}"
+              echo "Sig: ${SIGNATURE}"
+            ) > "$NARINFO_FILE"
+
+            echo "${NAR_FILENAME} created with .narinfo file ${NARINFO_FILE}"
+          done
 
       - name: Create nix-cache-info
         run: |
-          echo "StoreDir: /nix/store" > ./binary-cache/nix-cache-info
-          echo "WantMassQuery: 1" >> ./binary-cache/nix-cache-info
-          echo "Priority: 40" >> ./binary-cache/nix-cache-info
+          echo "StoreDir: /nix/store" > ./cache/nix-cache-info
+          echo "WantMassQuery: 1" >> ./cache/nix-cache-info
+          echo "Priority: 40" >> ./cache/nix-cache-info
 
       - name: Create Release and Upload NAR files
         env:
@@ -77,29 +135,24 @@ jobs:
           TAG="cache-$(date +%Y-%m-%d)-${{ github.sha }}"
           echo "RELEASE_TAG=${TAG}" >> $GITHUB_ENV
           gh release create "$TAG" --draft --title "Binary Cache ${TAG}"
-          find ./binary-cache/nar -type f -exec gh release upload "$TAG" {} +
+          find ./cache/nar -type f -exec gh release upload "$TAG" {} +
 
       - name: Rewrite .narinfo files
         run: |
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}"
-          for file in ./binary-cache/*.narinfo; do
+          for file in ./cache/*.narinfo; do
             NAR_FILE_NAME=$(basename $(grep -o 'nar/.*' "$file"))
             sed -i "s|URL: nar/.*|URL: ${RELEASE_URL}/${NAR_FILE_NAME}|" "$file"
           done
 
       - name: Clean up local NAR files
-        run: rm -rf ./binary-cache/nar
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./binary-cache
+        run: rm -rf ./cache/nar
 
       - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: cache
+          branch: cache
 
       - name: Publish the Release
         env:
