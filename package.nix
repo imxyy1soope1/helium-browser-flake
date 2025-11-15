@@ -11,23 +11,6 @@
       pname = "helium";
       version = info.version;
 
-      src-appimage = pkgs.fetchurl {
-        url = info.appimage_url;
-        hash = info.appimage_sha256;
-      };
-
-      helium-appimage = pkgs.appimageTools.wrapType2 {
-        inherit version;
-        pname = "${pname}-appimage";
-        src = src-appimage;
-
-        nativeBuildInputs = [ pkgs.copyDesktopItems ];
-        desktopItems = [
-          (pkgs.makeDesktopItem {
-          })
-        ];
-      };
-
       src = pkgs.fetchurl {
         url = info.tar_url;
         hash = info.tar_sha256;
@@ -157,8 +140,7 @@
     in
     {
       packages = {
-        inherit helium helium-appimage;
-
+        inherit helium;
         default = helium;
       };
     };
