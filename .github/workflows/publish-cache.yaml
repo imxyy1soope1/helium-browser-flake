@@ -1,6 +1,7 @@
 name: Publish Nix Binary Cache
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
