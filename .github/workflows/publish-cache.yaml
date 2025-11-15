@@ -75,7 +75,7 @@ jobs:
           SIGNING_KEY: ${{ secrets.NIX_SIGNING_KEY }}
           PATHS_TO_COPY: ${{ steps.calculate-paths.outputs.paths }}
         run: |
-          mkdir -p ./cache/nar
+          mkdir -p ./new-cache/nar
           echo "$SIGNING_KEY" > signing-key.pem
           for STORE_PATH in $PATHS_TO_COPY; do
             nix store sign --key-file signing-key.pem "$STORE_PATH"
@@ -98,13 +98,13 @@ jobs:
 
             # NAR_FILENAME="${FILE_HASH}.nar.xz"
             NAR_FILENAME="${FILE_HASH}.nar.zst"
-            mv "$NAR_COMPRESSED" "cache/nar/$NAR_FILENAME"
+            mv "$NAR_COMPRESSED" "new-cache/nar/$NAR_FILENAME"
             rm $NAR_TEMP
 
             STORE_PATH_HASH=$(basename "$STORE_PATH" | cut -d'-' -f1)
             STORE_PATH_NAME=$(basename "$STORE_PATH")
             REFS=$(nix-store --query --references "$STORE_PATH" | xargs -n1 basename | tr '\n' ' ')
-            NARINFO_FILE="cache/${STORE_PATH_HASH}.narinfo"
+            NARINFO_FILE="new-cache/${STORE_PATH_HASH}.narinfo"
 
             (
               echo "StorePath: $STORE_PATH"
@@ -124,9 +124,10 @@ jobs:
 
       - name: Create nix-cache-info
         run: |
-          echo "StoreDir: /nix/store" > ./cache/nix-cache-info
-          echo "WantMassQuery: 1" >> ./cache/nix-cache-info
-          echo "Priority: 40" >> ./cache/nix-cache-info
+          mkdir -p ./new-cache
+          echo "StoreDir: /nix/store" > ./new-cache/nix-cache-info
+          echo "WantMassQuery: 1" >> ./new-cache/nix-cache-info
+          echo "Priority: 40" >> ./new-cache/nix-cache-info
 
       - name: Create Release and Upload NAR files
         env:
@@ -135,23 +136,31 @@ jobs:
           TAG="cache-$(date +%Y-%m-%d)-${{ github.sha }}"
           echo "RELEASE_TAG=${TAG}" >> $GITHUB_ENV
           gh release create "$TAG" --draft --title "Binary Cache ${TAG}"
-          find ./cache/nar -type f -exec gh release upload "$TAG" {} +
+          find ./new-cache/nar -type f -exec gh release upload "$TAG" {} +
 
       - name: Rewrite .narinfo files
         run: |
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}"
-          for file in ./cache/*.narinfo; do
+          for file in ./new-cache/*.narinfo; do
             NAR_FILE_NAME=$(basename $(grep -o 'nar/.*' "$file"))
             sed -i "s|URL: nar/.*|URL: ${RELEASE_URL}/${NAR_FILE_NAME}|" "$file"
           done
 
       - name: Clean up local NAR files
-        run: rm -rf ./cache/nar
+        run: rm -rf ./new-cache/nar
+
+      - name: Merge with existing cache
+        run: |
+          # Clone existing cache branch. If it doesn't exist, create an empty directory for the new cache.
+          git clone --depth 1 --branch cache "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" merged-cache || mkdir merged-cache
+          # Copy the newly generated cache files into the checked-out directory.
+          # This will add new .narinfo files and overwrite nix-cache-info.
+          cp -a ./new-cache/* ./merged-cache/
 
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: cache
+          folder: merged-cache
           branch: cache
 
       - name: Publish the Release
