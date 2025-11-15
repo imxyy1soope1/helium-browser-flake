@@ -1,5 +1,5 @@
 StorePath: /nix/store/2ba09vw8pzprz6ycahbl24a69v62g656-helium-0.6.4.1
-URL: https://github.com/imxyy1soope1/helium-browser-flake/releases/download/cache-2025-11-15-e915e117730a15ec8f74517c2db6404e89c86eb7/07c8nl4b97haj9rp59x95nfz3a1yzfr88kiz3la60fcvbxdlyg9i.nar.zst
+URL: https://github.com/imxyy1soope1/helium-browser-flake/releases/download/cache-2025-11-15-c9221319256ffdec423781f0fd419b3a21a29323/07c8nl4b97haj9rp59x95nfz3a1yzfr88kiz3la60fcvbxdlyg9i.nar.zst
 Compression: zstd
 FileHash: sha256:07c8nl4b97haj9rp59x95nfz3a1yzfr88kiz3la60fcvbxdlyg9i
 FileSize: 187484019
